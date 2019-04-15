@@ -1,0 +1,510 @@
+---
+title: "APE_notes"
+author: "Iskander Said"
+date: "April 1, 2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '~/Documents/Clark_lab/VCF_outputs/mei_tsv/')
+#install.packages('vcfR')
+#install.packages('ape')
+#install.packages('phytools')
+```
+The following notes are to use the APE package to reconstruct the ancestral state of the TE insertion spectra from the BL6/10 mouse mutation acumulation line experiment. The first point of order is to figure out how APE works and see if I can get the test examples to work on it. I know for a fact that Emily used it on this data before, but I don't know how, exactly.
+
+The most obvious first step is to read in the VCF and parse out the genotype calls: A presence of a TE will be coded as 1 and absence will be 0. I will store a vector for each strain for the genotypes and a vector for the positions of each insertion. 
+
+The ACE function in ape should be able to reconstruct the ancestral characteristic of the trait. I need to input into it a phylo type class object that I must figure out how to input into R. Presumably this is the tree topology, and a vector of X is the trait? 
+
+```{r}
+#library(vcfR)
+library(ape)
+library(hash)
+library(abind)
+library(ggplot2)
+library(sandwich)
+library(gridExtra)
+library(ggrepel)
+#library(phytools)
+
+
+
+#I'm going to run through some examples to get a feel for the ape package:
+
+tree <- rtree(n=20)
+plot(tree, edge.width = 2)
+
+
+```
+
+```{r}
+str(tree)
+```
+
+By invoking as string we can see the underlying structure of this class object. With this information we could manipulate the object, but more simply we can use a Newick format tree. Luckily, I have created this previously, but with no branch lengths.
+```{r}
+nw <- "( ( ( (((BL6/NTac, BL6/NJ), (BL6/NCrl, BL6N-TyrCBrdCrlCrl)) ,BL6/NHsd), BL6/ByJ),(BL6/JBomTac,(BL6/J , BL6/JEiJ))),    (((BL10/ScSnJ, BL10/SnJ) , (BL10/ScCr,  BL10/ScNHsd)), BL10/J));" 
+
+tree<- read.tree(text=nw)
+plot(tree, type='cladogram', edge.width=2)
+```
+Here we have the phylogeny of the trees constructed which is great! There are no branch lengths in  this tree, however. I can use the branch length estimates from Emily Browns presentation to manually fill each of the branches, and/or I can use the "known" divergence times. However not all of the divergence times are known.  
+```{r}
+
+#This tree taken from emily browns wd
+eb_tree <- "((((((R104:0.04125, R52:0.04125):0.01195,(R114:0.04305,R134:0.04305):0.01015):0.00398,R124:0.05718):0.01931,R72:0.07649):0.00292,(R144:0.06160, (R2:0.05538,R84:0.05538):0.00622):0.01781):0.01657,(((R22:0.05963,R32:0.05963):0.01815,(R42:0.05382,R94:0.05382):0.02397):0.00621, R62:0.08399):0.01199);"
+
+tree<- read.tree(text=eb_tree)
+plot(tree, edge.width=2)
+```
+
+Frustratingly it has the monikers of the bam files and not the designations of the actual mouse lines, but this should be easily fixed.
+```{r}
+#This tree taken from emily browns wd
+eb_tree <- "((((((BL6/NTac:0.04125,BL6/NJ:0.04125):0.01195,(BL6/NCrl:0.04305,BL6N-TyrCBrdCrlCrl:0.04305):0.01015):0.00398,BL6/NHsd:0.05718):0.01931,BL6/ByJ:0.07649):0.00292,(BL6/JBomTac:0.06160,(BL6/J:0.05538,BL6/JEiJ:0.05538):0.00622):0.01781):0.01657,(((BL10/ScSnJ:0.05963,BL10/SnJ:0.05963):0.01815,(BL10/ScCr:0.05382,BL10/ScNHsd:0.05382):0.02397):0.00621, BL10/J:0.08399):0.01199);"
+test<- c(1,2,3,4,5,6,7,8,9,10,11,12,13)
+tree<- read.tree(text=eb_tree)
+plot(tree, edge.width=2)
+nodelabels(test)
+```
+Resounding success!, the tree topology has been constructed and presumably this can be used as a phylo object for the use of the ace package. The next step is to parse out the VCF file into a format that we could input into ape, and also retain the positional information of each TE insertions. My idea is quite simple. For each insertion we make 1d vector with 14 elements populated w/ 1 or 0 if the insert is present at the site. Figuring out how to parse VCFs in R is giving me a bit of a headache -- as an alternative I may just process all of my VCFs first in Python and then output the relevant positions to R (pass filtering, etc.). 
+```{r}
+b1_meis <- read.table('B1mei.tsv', sep = '\t', header = TRUE)
+b1_meis
+```
+Now we have read in all of the insertions that have passed our assesment socre of 5 and gotten each chromosome and position. We can now take these vectors and find a way to feed them into ace. To get a feel for this let's play with some examples from online:
+
+Here we have some tree topology and a number of characteristics.
+```{r}
+setwd('~/Documents/Clark_lab/')
+geotree <- read.nexus('Geospiza.nex')
+geodata <- read.table('Geospiza.txt')
+
+geotree <- drop.tip(geotree, 'olivacea')
+geodata <- geodata[geotree$tip.label, ]
+
+wingL <- geodata$wingL
+names(wingL) <- row.names(geodata)
+
+#reconstruct characteristics thru MLE 
+
+MLreconstruction <- ace(wingL, geotree, type="continuous", method="ML")
+
+#Computed now manipulate outputs
+MLreconstruction$ace
+
+#These are the node values for the wing length that were reconstructed using the MLE 
+wingLfinal <- c(wingL, MLreconstruction$ace)
+
+#Let's plot this out to see
+plot(geotree, show.tip.label=FALSE)
+tiplabels(pch = 21, cex=(wingL-3.9)*10)
+nodelabels(pch = 21, cex=(MLreconstruction$ace-3.9)*10)
+## (pch = 21 is just telling plot.phylo which symbol to use)
+```
+So now we've played around with this for continous variables let's play with a discrete variable example:
+```{r}
+setwd('~/Documents/Clark_lab/')
+geotree <- read.nexus('Geospiza.nex')
+
+#set up discrete RV
+char1<-c(1,1,1,1,1,0,1,0,0,1,0,1,1,1)
+names(char1)<-geotree$tip.label
+
+#Each model here uses different methods for transitions probabilities
+  ERreconstruction <- ace(char1, geotree, type="discrete", model="ER")
+  SYMreconstruction <- ace(char1, geotree, type="discrete", model="SYM")
+  ARDreconstruction <- ace(char1, geotree, type="discrete", model="ARD")
+
+  #Output the log likelihoods
+  ERreconstruction$loglik
+  SYMreconstruction$loglik
+  ARDreconstruction$loglik
+  #Rates
+  
+  ERreconstruction$rates
+  SYMreconstruction$rates
+  ARDreconstruction$rates
+  
+  ERreconstruction$ee
+```
+
+Now that I have played with this sufficiently I think I will input my own tree and vector of data and see how APE reconstruct a given TE insertion. One thing that should be considered is how we are inputting in these data.
+
+```{r}
+
+b1_meis <- read.table('B1mei.tsv', sep = '\t', header = TRUE)
+
+eb_tree<- "((((((BL6.NTac:0.04125,BL6.NJ:0.04125):0.01195,(BL6.NCrl:0.04305,BL6N-TyrCBrdCrlCrl:0.04305):0.01015):0.00398,BL6.NHsd:0.05718):0.01931,BL6.ByJ:0.07649):0.00292,(BL6.JBomTac:0.06160,(BL6.J:0.05538,BL6.JEiJ:0.05538):0.00622):0.01781):0.01657,(((BL10.ScSnJ:0.05963,BL10.SnJ:0.05963):0.01815,(BL10.ScCr:0.05382,BL10.ScNHsd:0.05382):0.02397):0.00621, BL10.J:0.08399):0.01199);"
+mouse_tree<- read.tree(text=eb_tree)
+
+#as.vector(b1_meis)
+ncol(b1_meis)
+# extract first row
+ins<-b1_meis$chr1_171058138
+#mouse_tree$tip.label
+names(ins) <- mouse_tree$tip.label
+
+b1_matrix<- as.matrix(b1_meis)
+#Checked that row names are the same
+ncol(b1_matrix)
+
+#mle_est <- ace(x = ins, phy = mouse_tree, type = 'discrete', model = 'SYM')
+
+#mle_est$ee
+
+
+
+
+```
+Testing complete let's derive a function to simplify
+
+```{r}
+
+calc_ACE<-function(mei_table){
+  eb_tree<- "((((((BL6.NTac:0.04125,BL6.NJ:0.04125):0.01195,(BL6.NCrl:0.04305,BL6N-TyrCBrdCrlCrl:0.04305):0.01015):0.00398,BL6.NHsd:0.05718):0.01931,BL6.ByJ:0.07649):0.00292,(BL6.JBomTac:0.06160,(BL6.J:0.05538,BL6.JEiJ:0.05538):0.00622):0.01781):0.01657,(((BL10.ScSnJ:0.05963,BL10.SnJ:0.05963):0.01815,(BL10.ScCr:0.05382,BL10.ScNHsd:0.05382):0.02397):0.00621, BL10.J:0.08399):0.01199);"
+  mouse_tree<- read.tree(text=eb_tree)
+  mei_matrix <- as.matrix(mei_table)
+  
+  ancestor_states <- matrix(nrow=ncol(mei_matrix)-1, ncol=4)
+  for (insertion in 2:ncol(mei_matrix)){
+    
+    ins_trait<-mei_matrix[,insertion]
+    
+    #In order for ACE to work it needs to consider only traits that are polymorphic between the tips, meaning all 0's or all 1's must be filtered -- all 0's were filtered pre-process but all 1's must be filtered now.
+    
+    if ( sum(strtoi(ins_trait)) != 14){#Check if vectors sums to 1 if no then proceed
+      names(ins_trait)<-mouse_tree$tip.label
+      ancestral <- ace(x=ins_trait, phy=mouse_tree, type='discrete', model='SYM')
+    #The most ancestral node is index 1 
+      
+      root_state <- c(ancestral$lik.anc[1,], ancestral$loglik, ancestral$se)
+      
+      #Addin the likelihood values for each to my matrix
+      ancestor_states[insertion-1, ] <- root_state
+      
+      }
+  
+  }
+  
+  sites <- colnames(mei_matrix)[c(2:length(colnames(mei_matrix)))]
+  ancestor_matrix<-cbind(sites, ancestor_states)
+  colnames(ancestor_matrix) <- c('MEI', '0', '1', 'SE', 'LogLik')
+  
+  return(ancestor_matrix)
+  }
+  
+  
+  
+  
+b1<- read.table('B1mei.tsv', sep = '\t', header = TRUE)
+ancestor_table<-calc_ACE(mei_table = b1)
+infile <- 'B1mei.tsv'
+outFILE <- strsplit(infile, '.tsv')
+
+write.table(ancestor_table, file = paste('~/Documents/Clark_lab/VCF_outputs/ancestral_meis/', outFILE, '.ancs.tsv', sep=''), sep='\t', quote = FALSE, row.names = FALSE)
+```
+The above function will work now iteratively on every tsv file, and will return a matrix that contains the likelihood of seeing a 0 (no insertion), 1 (yes insertion), the standard error, and the log likelihood of the model. The next chunk will iterate through all of my TSVs and will write out a table for each of the TEs. I will then use this to reconstruct the ancestral mouse. 
+
+```{r}
+path = '~/Documents/Clark_lab/VCF_outputs/mei_tsv/'
+
+file.names <- dir(path, pattern = '.tsv')
+
+for (file in 1:length(file.names)){
+  out <- strsplit(file.names[file], '.tsv')
+  mei <- read.table(file.names[file], header = TRUE, sep = '\t')
+  print(out)
+  ancestor_table <- calc_ACE(mei_table = mei)
+  write.table(ancestor_table, file = paste('~/Documents/Clark_lab/VCF_outputs/ancestral_meis/', out, '.ancs.tsv', sep=''), sep='\t', quote = FALSE, row.names = FALSE)
+  
+}
+```
+A few errors arose in some of the TE subfamilies, but I'm unsure in which, so I'll run again to troubleshoot. 
+
+The program failed after Lx5c. After examining the file it is because it contains no MEIs. I manually checked a few more files and removed ones that had no MEIs. 
+
+Now that all of the TSVs have been produced I will switch back to my beloved python for the plotting and the calculations and so on.
+
+
+An important thing that I missed when doing the initial analysis was that I didn't realize that the tree is unrooted. This means that some proportion of the gains/deletions are due to the fact that there is merely a greater sum of all branch lengths on the BL6 line than on the BL10 line. This could account for some of the differences in rate. To get around this and to also do some tests of homogeneity I want to get every ancestral state from each node and use the nodes that are immediately proximal to the oldest ancestral node for BL6 and BL10. To be completely honest, Andy explained to me why this would work, but I have immediately forgotten why. Let's rewrite our R function, but modifying so that we write out the highest probability call of insertion or deletion. 
+
+
+```{r}
+
+
+calc_all_ACE<-function(mei_table){
+  
+  #I want to generate a position x strain x ancestor_node matrix wherein each value of the matrix denotes a change in state from that node regardless if it makes sense phylogenetically -- i can deal with those consequences later this way I should be able to some fairly simple operations summing through the matrix or some such 
+  
+  eb_tree<- "((((((BL6.NTac:0.04125,BL6.NJ:0.04125):0.01195,(BL6.NCrl:0.04305,BL6N-TyrCBrdCrlCrl:0.04305):0.01015):0.00398,BL6.NHsd:0.05718):0.01931,BL6.ByJ:0.07649):0.00292,(BL6.JBomTac:0.06160,(BL6.J:0.05538,BL6.JEiJ:0.05538):0.00622):0.01781):0.01657,(((BL10.ScSnJ:0.05963,BL10.SnJ:0.05963):0.01815,(BL10.ScCr:0.05382,BL10.ScNHsd:0.05382):0.02397):0.00621, BL10.J:0.08399):0.01199);"
+  mouse_tree<- read.tree(text=eb_tree)
+  mei_matrix <- as.matrix(mei_table)
+  
+  
+  position_names<- vector()
+
+  
+  arr_index = 0
+  for (insertion in 2:ncol(mei_matrix)){
+    ins_trait<-mei_matrix[,insertion]
+    
+    #In order for ACE to work it needs to consider only traits that are polymorphic between the tips, meaning all 0's or all 1's must be filtered -- all 0's were filtered pre-process but all 1's must be filtered now.
+    
+    if ( sum(strtoi(ins_trait)) != 14){#Check if vectors sums to 1 if no then proceed
+      names(ins_trait)<-mouse_tree$tip.label
+      ancestral <- ace(x=ins_trait, phy=mouse_tree, type='discrete', model='SYM')
+    #The most ancestral node is index 1 
+      
+      node_ancestor_Probs <- ancestral$lik.anc
+      
+      
+      likelihood <- ancestral$loglik
+      
+      
+      #Now we have a vector of sites and we will iterate through each node and filter by likelihood first
+      if (likelihood > -9){
+        #If passes our likelihood filter we will check each row of the nodes and see
+        ancestor<-ifelse(node_ancestor_Probs[,1] >= .5, 0, 1) #make the value of each node 0 or 1 depending on probability of state
+        #get position names
+        position_names<-c(position_names, colnames(mei_table)[insertion])
+        
+        #Now we will check every node against every substrain and note a change in state into a matrix
+        #instant position matrix
+        
+        pos_matrix <-  matrix(nrow = 14, ncol = 13)
+        #Loop for each strain 
+        
+        for (strain in 1:14){
+          strain_trait <- ins_trait[strain]
+          #Loop for each ancestor
+          #instant array to hold array
+          all_changes <- vector()
+          for (ancs in 1:13){
+            if (ancestor[ancs] == strain_trait){
+              #case where ancestor is same state as strain mark as 0
+              change_state <- 0
+            }
+            else if (ancestor[ancs] > strain_trait){
+              #case where we have a loss of TE at position
+              change_state <- -1
+            }
+            else if (ancestor[ancs] < strain_trait){
+              #case where we have a gain in TE at position
+              change_state <- 1
+            }
+            all_changes <- c(all_changes, change_state)
+          }  
+        #add state changes to an array 
+          
+          pos_matrix[strain,] <- all_changes          
+          }
+        #Have a matrix constructed but don't know how to turn it into one data fram
+      
+        if (arr_index == 0){
+        ancestral_array <- array(data= pos_matrix, dim = c(14, 13, 1))
+      }
+      else { 
+      ancestral_array <- abind(ancestral_array, pos_matrix, along=3)
+      }
+      arr_index = 1
+    }
+     
+      
+  }
+  
+    
+}
+  
+  #rownames(ancestor_calls) <- position_names
+  #colnames(ancestor_calls) <- branching.times(mouse_tree)
+  dimnames(ancestral_array)[[3]] <- position_names
+  return(ancestral_array)
+  
+}
+b1<- read.table('B1mei.tsv', sep = '\t', header = TRUE)
+ancestor_table<-calc_all_ACE(mei_table = b1)
+#array of matrices outputted wherein each matrix represent a single position in the genome the dimension are the changes seen between
+#a particular strain and that 
+
+
+
+```
+Now we have outputted an array of matrices where each matrix is a position in the genome. Each element in this matrix represent the change of state between that particular node (col) and the strain (row). I calculated this regardless of the branch relationships of the nodes and the leaves. Now, what I must do is figure out which node is the one I care about for BL10 and BL6 and which strains are BL6 and BL10 so I can calculate the gains from these nodes and plot them. I also want to calculate the gains at each branch length so I can do a poisson regression on these data. First thing is first let's calculate the number of gains from the nodes that we care about for BL6 and BL10.
+
+
+```{r}
+#Function will compute the number of changes from the ancestral nodes of our specification and the 
+get_changes<-function(changes_array, node, strains=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14)){
+  gains_loss_matrix = matrix(data = 0, nrow = 2, ncol = 14)#gains, 1 ; loss, 2
+
+  for (position in 1:dim(changes_array)[3]){
+    #iterate through each position and calculate the number of gains/losses for each strain 
+    
+    for (mouse in strains){
+      
+      state_change <- changes_array[mouse, node, position]
+      
+      #check if the state change is a gain, loss or no change:
+      if (state_change == 1){
+        #gain of state relative to node
+        gains_loss_matrix[1, mouse] <- gains_loss_matrix[1, mouse] + 1
+        
+      }
+      else if  (state_change == -1){
+        #deletion relative to node
+        gains_loss_matrix[2, mouse] <- gains_loss_matrix[2, mouse] + 1
+        
+      }        
+    }
+    
+  }
+  
+  return(gains_loss_matrix)
+  
+  
+}
+
+#Let's test this out for node 10 vs. BL10 mice
+
+BL10_B1 <- get_changes(ancestor_table, node=10, strains=c(10,11,12,13, 14))
+BL6_B1 <- get_changes(ancestor_table, node=2, strains=c(1,2,3,4,5,6,7,8,9))
+
+
+BL_matrix <- BL6_B1 + BL10_B1
+
+#colnames(BL_matrix) <- mouse_tree$tip.label
+#rownames(BL_matrix) <- c('gains', 'losses')
+bl_B1<-data.frame(gains = BL_matrix[1,], losses = BL_matrix[2,], strains = mouse_tree$tip.label)
+
+b1_gains <- ggplot(bl_B1, aes(y=gains, x=strains, fill=strains)) + geom_bar(stat='identity') + theme_bw() +
+  xlab(label = 'Strain') + ylab('TE insertions') + theme(legend.position = 'none',  text = element_text(size=10)) + coord_flip() + ggtitle('B1 Insertions')
+
+b1_losses <- ggplot(bl_B1, aes(y=losses, x=strains, fill=strains)) + geom_bar(stat='identity') + theme_bw() +
+  xlab(label = 'Strain') + ylab('TE deletions') + theme(legend.position = 'none',  text = element_text(size=10)) + coord_flip() + ggtitle('B1 Deletions')
+
+grid.arrange(b1_gains , b1_losses)
+
+```
+An analysis of these B1 gains and losses from the nodes immediately to the right and left of the ancestral node show a much different picture. There is a much more similar rate of gain and loss from each of these nodes relative to each other now. Let's repeat this analysis on the B2 element.
+
+
+```{r}
+b2<- read.table('B2mei.tsv', sep = '\t', header = TRUE)
+b2_ancestor_table<-calc_all_ACE(mei_table = b2)
+
+BL10_B2 <- get_changes(b2_ancestor_table, node=10, strains=c(10,11,12,13, 14))
+BL6_B2 <- get_changes(b2_ancestor_table, node=2, strains=c(1,2,3,4,5,6,7,8,9))
+BL_matrix <- BL6_B2 + BL10_B2
+
+#colnames(BL_matrix) <- mouse_tree$tip.label
+#rownames(BL_matrix) <- c('gains', 'losses')
+bl_B2<-data.frame(gains = BL_matrix[1,], losses = BL_matrix[2,], strains = mouse_tree$tip.label)
+
+b2_gains <- ggplot(bl_B2, aes(y=gains, x=strains, fill=strains)) + geom_bar(stat='identity') + theme_bw() +
+  xlab(label = 'Strain') + ylab('TE insertions') + theme(legend.position = 'none',  text = element_text(size=10)) + coord_flip() + ggtitle('B2 Insertions')
+
+b2_losses <- ggplot(bl_B2, aes(y=losses, x=strains, fill=strains)) + geom_bar(stat='identity') + theme_bw() +
+  xlab(label = 'Strain') + ylab('TE deletions') + theme(legend.position = 'none', text = element_text(size=10)) + coord_flip() + ggtitle('B2 Deletions')
+
+grid.arrange(b2_gains, b2_losses)
+
+
+```
+Similar thing happened for the B2s I dont really understand how this can be purely an artifact of the topology? Is that branch length really just that much longer? 
+
+The next step is try to get the gains/losses per branch to do a poiss regression. To do this I can reuse some of  my functions at least for the leaf nodes. 
+
+```{r}
+#Plotting B1 gains per leaf to nearest node
+
+#Let's start with BL10 leaves
+
+ancestor_table<-calc_all_ACE(mei_table = b2) #call this to change it to B2
+#ancestor_table<-calc_all_ACE(mei_table = b1) #call this to change it t
+
+
+node_10<-get_changes(ancestor_table, node=10, strains=c(14))
+node_13<-get_changes(ancestor_table, node=13, strains=c(13, 12))
+node_12<-get_changes(ancestor_table, node = 12, strains = c(11, 10))
+
+###BL6 leaves
+node_9 <- get_changes(ancestor_table, node=9, strains = c(9,8))
+node_8 <- get_changes(ancestor_table, node = 8, strains = c(7) )
+node_3 <- get_changes(ancestor_table, node=3, strains = c(6))
+node_4 <- get_changes(ancestor_table, node = 4, strains = c(5))
+node_7 <- get_changes(ancestor_table, node = 7, strains = c(4,3))
+node_6  <- get_changes(ancestor_table, node=6, strains = c(2,1))
+
+#Let's jut plot the gains real quick
+branch_changes <- matrix(nrow = 2, ncol = 14)
+for (i in 1:2){
+  branch_changes[i,] <- c(node_6[i,1], node_6[i,2],  node_7[i,3], node_7[i,4], node_4[i,5], node_3[i,6], node_8[i,7], node_9[i,8], node_9[i,9], node_12[i,10], node_12[i,11], node_13[i,12], node_13[i,13], node_10[i,14])
+}
+
+
+#get the branch lengths for each of these 
+b_lengths<- c(mouse_tree$edge.length[6], mouse_tree$edge.length[7], mouse_tree$edge.length[9], mouse_tree$edge.length[10], mouse_tree$edge.length[11], mouse_tree$edge.length[12], mouse_tree$edge.length[14], mouse_tree$edge.length[16], mouse_tree$edge.length[17], mouse_tree$edge.length[21], mouse_tree$edge.length[22], mouse_tree$edge.length[24], mouse_tree$edge.length[25], mouse_tree$edge.length[26]) 
+
+gain_frame <- data.frame(gains=branch_changes[1,], lengths = b_lengths, loss = branch_changes[2,])
+#Playing with poisson regression
+g_bl<-glm(gains ~ lengths, data= gain_frame, family='poisson')
+cov.g_bl<-vcovHC(g_bl, type='HC0')
+std.err <- sqrt(diag(cov.g_bl))
+##y pred values from the poisson regression so I can a plot
+y_pred<-predict(g_bl, type = 'response')
+
+
+l_bl<-glm(loss ~ lengths, data=gain_frame, family = 'poisson')
+y_loss <- predict(l_bl, type='response')
+
+gain_frame <- data.frame(gains=branch_changes[1,], loss = branch_changes[2,], lengths = b_lengths, y_hat = y_pred, y_loss = y_loss)
+
+
+gains <-ggplot(gain_frame, aes(x=lengths, y=gains, color='Insertions')) + geom_point() + xlab(label = 'Branch lengths') + ylab(label = 'TE insertions/deletions') +ggtitle(label = 'B1 insertions/deletions vs. branch length') + geom_line(aes(x=lengths, y=y_hat, color='Poisson regression (Insertions)'))  + geom_point(aes(x = lengths, y=loss, color='Deletions')) + geom_line(aes(x=lengths, y=y_loss, color='Poisson regression (Deletions)')) + theme(text = element_text(size=15), legend.text = element_text(size = 7.5))
+
+summary(g_bl)
+summary(l_bl)
+
+
+
+#labels <-ggplot(gain_frame, aes(x=lengths, y=gains, color='Insertions')) + geom_point() + #geom_label_repel(label=mouse_tree$tip.label,size = 3.5)
+#labels
+
+
+#This will actually calculate the p-value using a deviance goodness of fit test
+pchisq(g_bl$deviance, df=g_bl$df.residual, lower.tail = FALSE)
+pchisq(l_bl$deviance, df=l_bl$df.residual, lower.tail = FALSE)
+
+gains
+```
+
+Testing manipulating the phylogenetic tree
+
+```{r}
+  eb_tree<- "((((((BL6.NTac:0.04125,BL6.NJ:0.04125):0.01195,(BL6.NCrl:0.04305,BL6N-TyrCBrdCrlCrl:0.04305):0.01015):0.00398,BL6.NHsd:0.05718):0.01931,BL6.ByJ:0.07649):0.00292,(BL6.JBomTac:0.06160,(BL6.J:0.05538,BL6.JEiJ:0.05538):0.00622):0.01781):0.01657,(((BL10.ScSnJ:0.05963,BL10.SnJ:0.05963):0.01815,(BL10.ScCr:0.05382,BL10.ScNHsd:0.05382):0.02397):0.00621, BL10.J:0.08399):0.01199);"
+  mouse_tree<- read.tree(text=eb_tree)
+  test<- seq(1:13)
+  plot(mouse_tree, type = 'cladogram', rotate.tree = 120, align.tip.label = TRUE, no.margin = TRUE)
+  edgelabels( seq(1:length(mouse_tree$edge.length)) )
+  nodelabels(test)
+  tiplabels()
+```
+
+
+
+
+
+The entirety of the ancestral reconstruction pipeline has been consolidated into a  single script known as ancestralTEs.R. This script will require the modified VCF > TSV input that I have created via my python script. There will be a readme incoming. 
+
+
+
+
+
+
+
+
+
+
